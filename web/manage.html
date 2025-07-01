@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gérer les Sauvegardes</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚙️ Gérer les Sauvegardes</h1>
+            <nav>
+                <a href="index.html">Accueil</a>
+                <a href="manage.html" class="active">Gérer</a>
+                <a href="logs.html">Logs</a>
+            </nav>
+        </header>
+
+        <div id="message-area"></div>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Ajouter une Nouvelle Sauvegarde</h2>
+                <form id="add-backup-form" class="form">
+                    <div class="form-group">
+                        <label>Nom de la sauvegarde :</label>
+                        <input type="text" id="backup-name" required placeholder="ex: photos_serveur2">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Type :</label>
+                        <select id="backup-type" onchange="toggleFields()">
+                            <option value="locale">Locale</option>
+                            <option value="distante">Distante (SSH/SSHFS)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Chemin source :</label>
+                        <input type="text" id="source-path" required placeholder="/chemin/vers/source">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Nom dossier destination :</label>
+                        <input type="text" id="dest-name" required placeholder="MonDossier">
+                    </div>
+
+                    <div id="ssh-fields" style="display: none;">
+                        <div class="form-group">
+                            <label>Utilisateur SSH :</label>
+                            <input type="text" id="ssh-user" placeholder="utilisateur">
+                        </div>
+                        <div class="form-group">
+                            <label>IP/Hostname :</label>
+                            <input type="text" id="ssh-ip" placeholder="192.168.1.100">
+                        </div>
+                        <div class="form-group">
+                            <label>Port SSH :</label>
+                            <input type="number" id="ssh-port" value="22">
+                        </div>
+                    </div>
+
+                    <h3>Rétention</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Quotidien (jours) :</label>
+                            <input type="number" id="retention-daily" value="7">
+                        </div>
+                        <div class="form-group">
+                            <label>Hebdomadaire :</label>
+                            <input type="number" id="retention-weekly" value="4">
+                        </div>
+                        <div class="form-group">
+                            <label>Mensuel :</label>
+                            <input type="number" id="retention-monthly" value="12">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Ajouter la Sauvegarde</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Sauvegardes Personnalisées</h2>
+                <div id="custom-backups">
+                    <p>Aucune sauvegarde personnalisée configurée.</p>
+                </div>
+                <button onclick="loadCustomBackups()" class="btn btn-secondary">Actualiser</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Configuration Générée</h2>
+            <div id="config-preview" class="config-preview">
+                <p>La configuration apparaîtra ici après avoir rempli le formulaire...</p>
+            </div>
+            <button onclick="downloadConfig()" class="btn btn-success" id="download-btn" style="display: none;">
+                Télécharger la Configuration
+            </button>
+        </div>
+    </div>
+
+    <script>
+        function toggleFields() {
+            const type = document.getElementById('backup-type').value;
+            const sshFields = document.getElementById('ssh-fields');
+            sshFields.style.display = type === 'distante' ? 'block' : 'none';
+            updateConfigPreview();
+        }
+
+        function updateConfigPreview() {
+            const name = document.getElementById('backup-name').value;
+            const type = document.getElementById('backup-type').value;
+            const source = document.getElementById('source-path').value;
+            const destName = document.getElementById('dest-name').value;
+            
+            if (!name || !source || !destName) {
+                document.getElementById('config-preview').innerHTML = '<p>Remplissez tous les champs requis...</p>';
+                document.getElementById('download-btn').style.display = 'none';
+                return;
+            }
+
+            const nameUpper = name.toUpperCase();
+            let config = `\n# SAUVEGARDE: ${name}\n`;
+            
+            if (type === 'locale') {
+                config += `SOURCE_LOCALE_${nameUpper}="${source}"\n`;
+                config += `DEST_MAIN_${nameUpper}="$DEST_BASE_SAUVEGARDES/${destName}/"\n`;
+                config += `DEST_INCR_BASE_${nameUpper}="$DEST_BASE_SAUVEGARDES/incremental-${destName}/"\n`;
+            } else {
+                const sshUser = document.getElementById('ssh-user').value;
+                const sshIp = document.getElementById('ssh-ip').value;
+                const sshPort = document.getElementById('ssh-port').value || '22';
+                
+                config += `SSH_USER_${nameUpper}="${sshUser}"\n`;
+                config += `SSH_IP_${nameUpper}="${sshIp}"\n`;
+                config += `SSH_PORT_${nameUpper}=${sshPort}\n`;
+                config += `SOURCE_DIST_${nameUpper}="${source}"\n`;
+                config += `MONTAGE_SSHFS_${nameUpper}="/tmp/sshfs_mounts/${name}"\n`;
+                config += `DEST_MAIN_${nameUpper}="$DEST_BASE_SAUVEGARDES/${destName}/"\n`;
+                config += `DEST_INCR_BASE_${nameUpper}="$DEST_BASE_SAUVEGARDES/incremental-${destName}/"\n`;
+            }
+            
+            const retentionDaily = document.getElementById('retention-daily').value || '7';
+            const retentionWeekly = document.getElementById('retention-weekly').value || '4';
+            const retentionMonthly = document.getElementById('retention-monthly').value || '12';
+            
+            config += `JOURS_RETENTION_${nameUpper}_QUOTIDIEN=${retentionDaily}\n`;
+            config += `JOURS_RETENTION_${nameUpper}_HEBDO=${retentionWeekly}\n`;
+            config += `JOURS_RETENTION_${nameUpper}_MENSUEL=${retentionMonthly}\n`;
+
+            document.getElementById('config-preview').innerHTML = `<pre>${config}</pre>`;
+            document.getElementById('download-btn').style.display = 'block';
+        }
+
+        function downloadConfig() {
+            const config = document.querySelector('#config-preview pre').textContent;
+            const blob = new Blob([config], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'sauvegardes_custom.conf';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function loadCustomBackups() {
+            // Simulation - dans un vrai environnement, ceci ferait un appel à un script
+            document.getElementById('custom-backups').innerHTML = 
+                '<p>Fonctionnalité nécessite un serveur web pour lire les fichiers de configuration.</p>';
+        }
+
+        // Mise à jour en temps réel de la prévisualisation
+        document.getElementById('add-backup-form').addEventListener('input', updateConfigPreview);
+
+        document.getElementById('add-backup-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('backup-name').value;
+            showMessage(`Configuration pour "${name}" générée. Téléchargez le fichier et ajoutez-le à sauvegardes_custom.conf`, 'success');
+        });
+
+        function showMessage(text, type) {
+            const messageArea = document.getElementById('message-area');
+            messageArea.innerHTML = `<div class="alert ${type}">${text}</div>`;
+            setTimeout(() => messageArea.innerHTML = '', 5000);
+        }
+    </script>
+</body>
+</html>
