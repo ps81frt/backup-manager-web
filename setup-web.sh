@@ -131,10 +131,11 @@ sed -i 's/^max_execution_time.*/max_execution_time = 300/' "$PHP_INI"
 # 2. Permissions des scripts
 chmod +x *.sh
 
-# 3. Ajouter www-data au groupe fuse pour SSHFS
-usermod -a -G fuse www-data
+# 3. Configuration initiale de www-data
 usermod -s /bin/bash www-data
-echo "www-data ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+if ! grep -q "www-data ALL=(ALL) NOPASSWD: ALL" /etc/sudoers; then
+    echo "www-data ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+fi
 
 # 4. Créer les répertoires nécessaires
 mkdir -p /var/www/.ssh /tmp/{backup_logs,backups,sshfs_mounts}
@@ -195,20 +196,30 @@ fi
 # 8. Vérification des permissions et groupes
 echo "Configuration des permissions..."
 
-# Déterminer le groupe fuse correct
-FUSE_GROUP="fuse"
-if getent group fuse3 >/dev/null 2>&1; then
+# Gestion du groupe fuse pour SSHFS
+FUSE_GROUP=""
+if getent group fuse >/dev/null 2>&1; then
+    FUSE_GROUP="fuse"
+elif getent group fuse3 >/dev/null 2>&1; then
     FUSE_GROUP="fuse3"
+else
+    # Créer le groupe fuse s'il n'existe pas
+    echo "Création du groupe fuse..."
+    groupadd fuse 2>/dev/null || true
+    FUSE_GROUP="fuse"
 fi
 
-if ! groups www-data | grep -q "$FUSE_GROUP"; then
+# Ajouter www-data au groupe fuse si nécessaire
+if [ -n "$FUSE_GROUP" ] && ! groups www-data | grep -q "$FUSE_GROUP"; then
     usermod -a -G "$FUSE_GROUP" www-data
     echo "www-data ajouté au groupe $FUSE_GROUP"
 fi
 
-if ! grep -q "www-data ALL=(ALL) NOPASSWD: ALL" /etc/sudoers; then
-    echo "www-data ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-    echo "Permissions sudo accordées à www-data"
+# Permissions alternatives pour SSHFS si pas de groupe fuse
+if [ -z "$FUSE_GROUP" ] || ! getent group "$FUSE_GROUP" >/dev/null 2>&1; then
+    echo "Configuration alternative pour SSHFS sans groupe fuse..."
+    # Permettre à www-data d'utiliser SSHFS via sudo
+    echo "www-data ALL=(ALL) NOPASSWD: /usr/bin/sshfs, /usr/bin/fusermount*" >> /etc/sudoers
 fi
 
 # 9. Génération de la clé SSH pour l'interface web
@@ -247,6 +258,11 @@ for tool in rsync ssh sshfs; do
         ERRORS+=("Outil manquant: $tool")
     fi
 done
+
+# Vérifier la configuration fuse
+if ! getent group fuse >/dev/null 2>&1 && ! getent group fuse3 >/dev/null 2>&1; then
+    ERRORS+=("Groupe fuse non configuré - SSHFS pourrait ne pas fonctionner")
+fi
 
 echo ""
 if [ ${#ERRORS[@]} -eq 0 ]; then
