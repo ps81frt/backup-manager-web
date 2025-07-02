@@ -11,7 +11,7 @@ echo "Installation de Backup Manager Web..."
 if command -v apt-get >/dev/null 2>&1; then
     # Debian/Ubuntu
     apt-get update
-    apt-get install -y apache2 php libapache2-mod-php php-cli rsync openssh-client sshfs fuse mailutils timeout
+    apt-get install -y apache2 php libapache2-mod-php php-cli rsync openssh-client sshfs fuse mailutils 
     systemctl enable apache2
     systemctl start apache2
 elif command -v yum >/dev/null 2>&1; then
