@@ -10,22 +10,22 @@
 
 Backup Manager Web combine la robustesse des scripts Bash avec la convivialité d'une interface web moderne pour créer un système de sauvegarde automatisé complet.
 
-### ✨ Fonctionnalités Principales
+## ✨ Fonctionnalités Principales
 
-- 🔄 **Sauvegardes incrémentales** avec rsync et hardlinks
-- 🌐 **Interface web moderne** avec dashboard temps réel
-- 💻 **Terminal interactif** intégré au navigateur
-- 📊 **Métriques temps réel** et surveillance automatique
-- 🔧 **Configuration centralisée** et sauvegardes personnalisées
-- 🛡️ **17 codes d'erreur** avec diagnostic automatique
-- 📱 **Design responsive** compatible mobile/desktop
+- 🔄 **Sauvegardes incrémentales** avec `rsync` et hardlinks  
+- 🌐 **Interface web moderne** avec dashboard en temps réel  
+- 💻 **Terminal interactif** intégré directement dans le navigateur  
+- 📊 **Métriques temps réel** et surveillance automatique  
+- 🔧 **Configuration centralisée** avec sauvegardes personnalisables  
+- 🛡️ **17 codes d'erreur** avec système de diagnostic intégré  
+- 📱 **Design responsive** compatible mobiles, tablettes et desktop
 
-### 🏗️ Architecture
+## 🏗️ Architecture
 
-- **Scripts Bash** : Logique de sauvegarde robuste
-- **Interface PHP** : Dashboard et gestion web
-- **JavaScript** : Interactivité et temps réel
-- **Configuration** : Fichiers centralisés (.conf)
+- 🐚 **Scripts Bash** – Logique de sauvegarde fiable et automatisée  
+- 🧩 **Interface PHP** – Tableau de bord web et gestion des tâches  
+- ⚡ **JavaScript** – Interactivité dynamique, terminal, métriques  
+- 🗂️ **Configuration centralisée** – Tous les paramètres via `.conf`
 
 ## 🚀 Installation Rapide
 
@@ -40,11 +40,11 @@ cd backup-manager-web
 sudo ./setup-web.sh
 ```
 
-### Systèmes Supportés
+## 🖥️ Systèmes supportés
 
-- ✅ **Debian/Ubuntu** (apt-get)
-- ✅ **RHEL/CentOS** (yum/dnf)
-- ✅ **Fedora** (dnf)
+- ✅ **Debian / Ubuntu** — support natif via `apt-get` (aucun ajustement nécessaire)  
+- ⚠️ **RHEL / CentOS** — nécessite quelques ajustements manuels (ex : activation de `EPEL`, configuration de `sudo`, etc.)  
+- ⚠️ **Fedora** — support partiel, des modifications manuelles peuvent être requises (ex : gestion des services, compatibilité de certaines dépendances)
 
 ### Dépendances Installées Automatiquement
 
@@ -100,9 +100,14 @@ http://votre-serveur/backup-manager-web/web/
 
 ## 📚 Documentation
 
-- 📖 **[Manuel Complet](../Documentation/manual/Manuel.md)** - Documentation technique exhaustive
-- 🔧 **[Guide d'Installation](../Documentation/manual/Manuel.md#installation-et-configuration-initiale)** - Installation détaillée
-- 🐛 **[Résolution de Problèmes](../Documentation/manual/Manuel.md#diagnostics-et-résolution-de-bugs)** - Diagnostic et dépannage
+- 📘 **[Manuel complet](https://github.com/ps81frt/backup-manager-web/blob/main/Documentation/manual/Manuel.md)**  
+  Documentation technique détaillée avec explications des scripts, de l’architecture, et des options.
+
+- ⚙️ **[Guide d'installation rapide](https://github.com/ps81frt/backup-manager-web/blob/main/Documentation/manual/Manuel.md#installation-et-configuration-initiale)**  
+  Étapes pas à pas pour installer et configurer Backup Manager Web sur Debian, Ubuntu, RHEL, etc.
+
+- 🧯 **[Résolution de problèmes](https://github.com/ps81frt/backup-manager-web/blob/main/Documentation/manual/Manuel.md#diagnostics-et-résolution-de-bugs)**  
+  Guide de diagnostic, explication des 17 codes d’erreur et des solutions courantes.
 
 ## 👥 Équipe de Développement
 
