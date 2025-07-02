@@ -1,0 +1,597 @@
+.TH BACKUP-MANAGER-WEB 1 "24 Juillet 2025" "6.5" "Système de Sauvegarde Hybride"
+.SH NAME
+backup-manager-web - système hybride Bash/Web robuste et complet pour la sauvegarde incrémentale de fichiers locaux et distants, avec interface web moderne, gestion de la rétention et diagnostics avancés
+
+.SH SYNOPSIS
+.B sauvegarde.sh
+[\fIoptions\fR] [\fIselection\fR...]
+
+.SH DESCRIPTION
+Le système
+.B backup-manager-web
+, version 6.5, est un outil hybride puissant, flexible et hautement configurable,
+conçu pour automatiser la sauvegarde de vos données importantes. Il combine la robustesse
+des scripts Bash avec la convivialité d'une interface web moderne et professionnelle. Il gère à la fois
+les fichiers stockés localement sur votre machine et ceux présents sur des hôtes
+distants (machines virtuelles, ordinateurs portables, serveurs) via SSH ou SSHFS. 
+
+Ce système s'appuie sur
+.B rsync
+(1) pour effectuer des sauvegardes incrémentales intelligentes.  Cette méthode optimise
+drastiquement l'espace disque et le temps nécessaire à chaque exécution en
+tirant parti de l'option
+.B --link-dest
+de
+.B rsync
+.  Cela signifie que seules les modifications ou les nouveaux fichiers sont effectivement
+copiés, tandis que les fichiers inchangés sont liés en dur (hard-linked) à la
+sauvegarde précédente, résultant en d'importantes économies d'espace disque sur la destination. 
+
+La présente version a été méticuleusement refactorisée pour améliorer sa
+modularité, sa robustesse, sa maintenabilité et sa capacité de diagnostic. 
+En centralisant la configuration, en utilisant des fonctions dédiées pour chaque tâche
+(journalisation, gestion d'erreurs, vérifications de sécurité, montage SSHFS, etc.)
+et en intégrant une interface web moderne avec dashboard temps réel, terminal interactif
+et gestion des configurations, le système offre une solution de sauvegarde fiable et de qualité professionnelle. 
+Le système est conçu pour être exécuté manuellement, via l'interface web interactive ou via un planificateur de tâches
+comme
+.B cron
+(8). 
+
+.SH FONCTIONNALITÉS PRINCIPALES
+.IP \(bu 4
+\fBSauvegardes Incrémentales Optimisées\fR: Utilisation intelligente de
+.B rsync
+avec
+.B --link-dest
+pour des sauvegardes rapides et économes en espace. 
+.IP \(bu 4
+\fBInterface Web Moderne et Professionnelle\fR: Dashboard temps réel avec métriques de performance,
+terminal interactif avec session persistante, gestion complète des sauvegardes personnalisées
+et consultation avancée des logs via navigateur web. Design responsive compatible mobile/desktop.
+.IP \(bu 4
+\fBSauvegardes Locales et Distantes\fR: Prise en charge des sources de données sur la machine locale
+et sur des hôtes distants via SSH. Connexions distantes configurables en SSHFS ou rsync direct via SSH. 
+Support multi-distributions (Debian/Ubuntu, RHEL/CentOS, Fedora).
+.IP \(bu 4
+\fBGestion de la Rétention Granulaire\fR: Nettoyage automatique et configurable des anciennes sauvegardes
+avec des politiques de rétention quotidiennes, hebdomadaires et mensuelles pour chaque catégorie de données.
+Ceci permet de maintenir un historique tout en libérant de l'espace disque. 
+.IP \(bu 4
+\fBSécurité Renforcée\fR: Validation stricte des entrées avec 6 types de validation (string, path, int, ip, port, uuid),
+échappement des commandes shell, clés SSH dédiées pour l'interface web et options shell sécurisées.
+Utilisation de verrous de fichiers PID avec `trap EXIT` pour empêcher les exécutions concurrentes,
+garantissant l'intégrité des données de sauvegarde et la cohérence des opérations. 
+.IP \(bu 4
+\fBNotifications par Email Intelligentes\fR: Envoi automatique de rapports détaillés par email
+à la fin de l'exécution, avec classification des messages (succès complet, échec partiel, erreur critique)
+et résumé statistique des opérations. Support de multiples destinataires.
+.IP \(bu 4
+\fBJournalisation Détaillée et Configurable\fR: Système de log multi-niveaux (INFO/ATTENTION/ERREUR)
+avec horodatage précis, rotation automatique et compression configurable.
+Logs de secours (`/tmp/backup_fallback_errors.log`) même si journalisation principale échoue.
+.IP \(bu 4
+\fBDiagnostic d'Erreurs Avancé\fR: 17 codes d'erreur spécifiques avec actions suggérées automatiques,
+incluant des "pistes" et des "actions" de dépannage concrètes en cas de problème.
+Fonction centralisée `diagnostiquer_et_logger_erreur()` facilitant la résolution même pour les utilisateurs non-experts. 
+.IP \(bu 4
+\fBConfiguration Centralisée et Modulaire\fR: Plus de 75 variables organisées en 9 catégories logiques
+dans le fichier `config.sh` séparé. Chemins d'exécutables configurables pour portabilité maximale.
+Le système est structuré en fonctions distinctes pour chaque tâche,
+rendant le code plus propre, plus lisible et plus facile à maintenir et à étendre. 
+.IP \(bu 4
+\fBGestion Robuste des Points de Montage SSHFS\fR: Montage/démontage automatique avec retry (3 tentatives),
+gestion des processus occupants avec `lsof` et `kill`, adaptation automatique pour environnement web (www-data).
+Points de montage automatiquement démontés même en cas d'erreur grâce à `trap EXIT`. 
+
+.SH OPTIONS
+Le script supporte les options suivantes :
+
+.TP
+.B --list
+Affiche la liste détaillée des sélections de sauvegardes configurées et disponibles,
+incluant leur statut (activée/désactivée) depuis `default_backups.conf` et les sauvegardes personnalisées
+depuis `sauvegardes_custom.conf`. Chaque sélection correspond à un ensemble de chemins source et destination prédéfinis.
+
+.TP
+.B --dry-run
+Permet de simuler une exécution complète du script sans effectuer de modifications réelles sur les données.
+Utile pour tester la configuration, valider les chemins, et visualiser les opérations de `rsync`
+sans risque. Le mode dry-run est clairement indiqué dans les journaux avec le préfixe "DRY-RUN:".
+Toutes les étapes sont simulées : vérifications, montages SSHFS, commandes rsync.
+
+.TP
+.B --debug
+Active le mode débogage avancé, fournissant des informations extrêmement détaillées sur l'exécution,
+y compris les valeurs des variables, les commandes exécutées et leurs sorties complètes.
+Surcharge la variable `DEFAULT_MODE_DEBOGAGE` de `config.sh`. Indispensable pour le diagnostic approfondi.
+
+.TP
+.B --no-logs
+Désactive temporairement la journalisation standard dans les fichiers de log.
+Les erreurs critiques seront toujours enregistrées dans `/tmp/backup_fallback_errors.log`.
+Surcharge la variable `DEFAULT_JOURNAUX_DESACTIVES` de `config.sh`.
+
+.TP
+.B --no-lock
+Désactive le mécanisme de verrouillage PID du script. Par défaut, un fichier de verrou est créé
+pour empêcher les exécutions multiples simultanées. Utilisez cette option avec extrême prudence
+car elle peut causer des corruptions de données. Surcharge la variable `ACTIVERLOCK` de `config.sh`.
+
+.TP
+.B --type-connexion-distante
+Spécifie explicitement le type de connexion pour les hôtes distants. Accepte `sshfs` (par défaut, recommandé)
+ou `ssh` (rsync direct via SSH). Surcharge la variable `DEFAULT_TYPE_CONNEXION_DISTANTE` de `config.sh`.
+SSHFS est généralement plus performant pour de nombreux petits fichiers.
+
+.TP
+.B --help
+Affiche un message d'aide détaillé avec exemples d'utilisation et quitte.
+
+Le script accepte des arguments pour sélectionner les catégories de sauvegardes
+à exécuter. Si aucun argument n'est fourni, le script utilise la configuration
+par défaut définie par la variable
+.B DEFAULT_SELECTIONS_SAUVEGARDES
+dans `config.sh`. 
+
+Les arguments de sélection sont des noms explicites (lisibles et intuitifs)
+définis dans le script et les fichiers de configuration. 
+
+.IP "\fBselection\fR..."
+Spécifie une ou plusieurs catégories de sauvegardes à exécuter.  Vous pouvez
+passer plusieurs sélections séparées par des espaces. Les sauvegardes désactivées
+dans `default_backups.conf` sont automatiquement ignorées.
+.RS
+.IP "\fBdocs_eric\fR"
+Sauvegarde les documents d'Eric (locale). Source: `/home/eric/Documents`
+.IP "\fBdocs_fanou\fR"
+Sauvegarde les documents de Fanou (locale). Source: `/home/fanou/Documents`
+.IP "\fBphotos_vm\fR"
+Sauvegarde les photos depuis une machine virtuelle distante via SSHFS.
+Requiert configuration SSH complète (utilisateur, IP, port, clé).
+.IP "\fBprojets_serveur\fR"
+Sauvegarde les projets hébergés sur un serveur distant via SSHFS.
+Idéal pour les environnements de développement distribués.
+.IP "\fBdocs_portable\fR"
+Sauvegarde les documents depuis un ordinateur portable distant.
+Parfait pour synchroniser les données nomades.
+.IP "\fBall\fR"
+Exécute toutes les sauvegardes configurées et actives (par défaut + personnalisées).
+C'est l'option recommandée pour les exécutions automatisées via cron.
+Ignore automatiquement les sauvegardes désactivées.
+.IP "\fBnom_personnalisé\fR"
+Toute sauvegarde personnalisée définie via l'interface web ou dans `sauvegardes_custom.conf`.
+Le nom doit respecter le format `[a-zA-Z0-9_]{3,50}`.
+.RE
+
+.SH CONFIGURATION (Fichier `config.sh`)
+Le fichier
+.B config.sh
+est le centre de contrôle absolu du système
+.B backup-manager-web
+. 
+Il doit être situé dans le même répertoire que
+.B sauvegarde.sh
+. 
+Il est impératif d'éditer ce fichier pour adapter le système à votre environnement
+et à vos besoins spécifiques. Plus de 75 variables sont organisées en 9 sections logiques
+pour une configuration claire et maintenable. Ce fichier est lu par les scripts Bash
+et l'interface web PHP pour assurer une cohérence totale de la configuration. 
+
+.SS SECTION 1 - OPTIONS GLOBALES DU SYSTÈME
+.IP "\fBEMAIL_NOTIFICATION\fR=\fI"votre_email@example.com"\fR"
+Adresse email unique ou liste d'adresses séparées par des espaces pour les rapports automatiques.
+Trois types de notifications sont envoyés : succès complet, échec partiel, erreur critique.
+Laissez vide (`""`) pour désactiver. Requiert un MTA configuré (`mailx`, `sendmail`).
+Variable utilisée par la fonction `envoyer_rapport_email()`.
+.IP "\fBDEST_BASE_SAUVEGARDES\fR=\fI"/mnt/backup_nas"\fR"
+Chemin racine absolu de toutes les sauvegardes sur le disque externe ou NAS.
+.B Point de montage principal de votre infrastructure de sauvegarde.
+En mode web, s'adapte automatiquement à `/tmp/backups` si inaccessible.
+Tous les chemins de destination sont calculés relativement à cette base.
+.IP "\fBLOG_DIR\fR=\fI"/var/log/sauvegardes"\fR"
+Répertoire des fichiers de log quotidiens (`sauvegarde_YYYYMMDD.log`).
+En mode web, bascule automatiquement vers `/tmp/backup_logs` si inaccessible.
+Supporte rotation automatique et compression selon `TAILLE_MAX_LOG_MO` et `JOURS_RETENTION_LOGS`.
+.IP "\fBESPACE_DISQUE_MIN_GO\fR=\fI5\fR"
+Espace disque minimum requis en Gigaoctets avant démarrage des sauvegardes.
+Vérifié par `verifier_espace_disque()` avec commande `df -BG`.
+Prévient le remplissage accidentel du disque de destination.
+.IP "\fBDEFAULT_RSYNC_OPTIONS\fR=\fI"-avh --partial --progress --info=progress2,misc0,name0"\fR"
+Options rsync par défaut optimisées pour performance et lisibilité :
+.RS
+.IP "\fB-avh\fR"
+Mode archive (récursif, permissions, timestamps) + verbose + tailles lisibles
+.IP "\fB--partial --progress\fR"
+Reprise des transferts interrompus + progression détaillée
+.IP "\fB--info=progress2,misc0,name0\fR"
+Affichage progression globale optimisé pour les longues sauvegardes
+.RE
+.IP "\fBRSYNC_DELETE\fR=\fI0|1\fR"
+Contrôle l'option `--delete` de rsync. 0=sécurisé (recommandé pour incrémentales),
+1=supprime fichiers supprimés de la source. Utilisez avec extrême prudence.
+.IP "\fBACTIVERLOCK\fR=\fI0|1\fR"
+Mécanisme de verrouillage PID via fichier `$PID_FILE`. Empêche les exécutions concurrentes
+qui pourraient corrompre les sauvegardes. Géré par `gerer_verrouillage()` avec `trap EXIT`.
+.IP "\fBDEFAULT_TYPE_CONNEXION_DISTANTE\fR=\fI0|1\fR"
+Méthode de connexion pour hôtes distants :
+.RS
+.IP "\fB0\fR = \fBSSHFS\fR"
+(recommandé). Montage temporaire du système de fichiers distant,
+plus performant pour nombreux petits fichiers. Requiert package `sshfs`.
+.IP "\fB1\fR = \fBSSH Direct\fR"
+Rsync direct via SSH, plus simple mais potentiellement moins performant.
+.RE
+.IP "\fBDEFAULT_SELECTIONS_SAUVEGARDES\fR=\fI"docs_eric docs_fanou"\fR"
+Sauvegardes exécutées par défaut si aucun argument fourni.
+Peut contenir noms explicites ou "all" pour toutes les sauvegardes actives.
+.IP "\fBDEFAULT_MODE_DEBOGAGE\fR=\fI0|1\fR"
+Mode débogage global (0=production, 1=diagnostic). Active journalisation détaillée
+incluant commandes exécutées et leurs sorties. Surcharge possible via `--debug`.
+.IP "\fBDEFAULT_JOURNAUX_DESACTIVES\fR=\fI0|1\fR"
+Contrôle journalisation (0=active, 1=désactivée). Même désactivée,
+les erreurs critiques vont dans `/tmp/backup_fallback_errors.log`.
+
+.SS SECTION 2 - CHEMINS DES EXÉCUTABLES (Portabilité Multi-Distributions)
+Ces variables permettent de spécifier les chemins complets des outils système
+pour assurer la portabilité entre distributions (Debian/Ubuntu, RHEL/CentOS, Fedora).
+Laissez vide pour utiliser la détection automatique via `command -v`.
+.IP "\fBCHEMIN_RSYNC\fR=\fI"/usr/bin/rsync"\fR"
+Chemin vers l'exécutable rsync. Vérifié par `verifier_chemin_executables()`.
+.IP "\fBCHEMIN_SSH\fR=\fI"/usr/bin/ssh"\fR"
+Chemin vers le client SSH pour connexions distantes.
+.IP "\fBCHEMIN_SSHFS\fR=\fI"/usr/bin/sshfs"\fR"
+Chemin vers SSHFS pour montage de systèmes de fichiers distants.
+.IP "\fBCHEMIN_FUSEMOUNT\fR=\fI"/usr/bin/fusermount"\fR"
+Chemin vers fusermount pour démontage propre des points SSHFS.
+.IP "\fBCHEMIN_MOUNTPOINT\fR=\fI"/usr/bin/mountpoint"\fR"
+Utilitaire de vérification des points de montage.
+.IP "\fBCHEMIN_LSOF\fR=\fI"/usr/bin/lsof"\fR"
+Outil de listage des fichiers ouverts, utilisé pour forcer le démontage SSHFS.
+.IP "\fBCHEMIN_KILL\fR=\fI"/usr/bin/kill"\fR"
+Commande kill pour terminer les processus récalcitrants.
+.IP "\fBCHEMIN_MKDIR\fR=\fI"/usr/bin/mkdir"\fR"
+Création de répertoires avec support des permissions.
+.IP "\fBCHEMIN_MAIL\fR=\fI"/usr/bin/mailx"\fR"
+Commande d'envoi d'email (mailx ou mail selon distribution).
+
+.SS SECTION 3 - CONFIGURATION SSH AVANCÉE (pour machines distantes)
+Paramètres de connexion SSH optimisés pour les sauvegardes automatisées.
+.IP "\fBDELAI_CONNEXION_SSH_SECONDES\fR=\fI10\fR"
+Timeout de connexion SSH en secondes. Évite les blocages sur hôtes inaccessibles.
+.IP "\fBOPTIONS_COMMUNES_SSH\fR=\fI"-o BatchMode=yes -o ConnectTimeout=10"\fR"
+Options SSH communes pour toutes les connexions distantes.
+BatchMode=yes évite les prompts interactifs, essentiel pour l'automatisation.
+.IP "\fBStrictHostKeyChecking_SSH\fR=\fI"no"\fR"
+Contrôle vérification des clés d'hôte ("yes", "no", "ask").
+"no" facilite l'automatisation mais réduit la sécurité.
+.IP "\fBSSH_KEY_PATH\fR=\fI""\fR"
+Chemin vers clé SSH privée spécifique. Vide = clé par défaut (~/.ssh/id_rsa).
+.IP "\fBSSH_AUTH_SOCK_PATH\fR=\fI""\fR"
+Socket de l'agent SSH si utilisé pour gestion centralisée des clés.
+
+.SS SECTION 4 - PARAMÈTRES RSYNC AVANCÉS
+.IP "\fBDELAI_OPERATION_RSYNC_SECONDES\fR=\fI0\fR"
+Timeout global pour opérations rsync (0=illimité). Utilisé avec commande `timeout`.
+Recommandé: 3600 (1h) pour grandes sauvegardes.
+.IP "\fBOPTIONS_RSYNC_INCREMENTALE\fR=\fI"--link-dest=../current"\fR"
+Options spécifiques aux sauvegardes incrémentales. `--link-dest` crucial
+pour économies d'espace via hardlinks vers sauvegarde précédente.
+
+.SS SECTION 5 - GESTION AVANCÉE DES LOGS
+.IP "\fBTAILLE_MAX_LOG_MO\fR=\fI10\fR"
+Taille maximale d'un fichier de log avant rotation automatique (0=désactivé).
+.IP "\fBJOURS_RETENTION_LOGS\fR=\fI30\fR"
+Nombre de jours avant compression/purge des anciens logs (0=désactivé).
+.IP "\fBCOMMANDE_COMPRESSION_LOGS\fR=\fI"gzip"\fR"
+Commande de compression pour archivage des logs (gzip, bzip2, xz).
+
+.SS SECTION 6 - HOOKS PERSONNALISÉS (Extensibilité)
+.IP "\fBSCRIPT_PRE_SAUVEGARDE_GLOBAL\fR=\fI""\fR"
+Script exécuté avant toutes les sauvegardes. Permet préparations personnalisées
+(arrêt services, snapshots LVM, etc.). Doit être exécutable.
+.IP "\fBSCRIPT_POST_SAUVEGARDE_GLOBAL\fR=\fI""\fR"
+Script exécuté après toutes les sauvegardes. Idéal pour nettoyages,
+notifications personnalisées, synchronisation cloud.
+
+.SS SECTION 7 - SAUVEGARDES PRÉDÉFINIES
+Configuration des 5 sauvegardes par défaut avec variables cohérentes.
+Chaque sauvegarde suit le pattern : SOURCE_*, DEST_MAIN_*, DEST_INCR_BASE_*,
+SSH_USER_*, SSH_IP_*, SSH_PORT_*, MONTAGE_SSHFS_*.
+
+\fBSauvegardes Locales :\fR
+.IP "\fBSOURCE_LOCALE_DOCS_ERIC\fR=\fI"/home/eric/Documents"\fR"
+.IP "\fBSOURCE_LOCALE_DOCS_FANOU\fR=\fI"/home/fanou/Documents"\fR"
+
+\fBSauvegardes Distantes (via SSHFS) :\fR
+.IP "\fBSSH_USER_PHOTOS\fR=\fI"votre_utilisateur_vm_photos"\fR"
+.IP "\fBSSH_IP_PHOTOS\fR=\fI"192.168.1.100"\fR"
+.IP "\fBSSH_PORT_PHOTOS\fR=\fI22\fR"
+.IP "\fBSOURCE_DIST_PHOTOS_VM\fR=\fI"/chemin/sur/vm/Photos"\fR"
+.IP "\fBMONTAGE_SSHFS_PHOTOS\fR=\fI"/tmp/sshfs_mounts/photos_vm"\fR"
+
+.SS SECTION 8 - POLITIQUES DE RÉTENTION GRANULAIRES
+Gestion automatique de l'historique avec 3 niveaux de rétention par sauvegarde.
+La fonction `nettoyer_anciennes_sauvegardes()` applique ces politiques.
+.IP "\fBJOURS_RETENTION_*_QUOTIDIEN\fR=\fI7\fR"
+Nombre de sauvegardes quotidiennes à conserver (les plus récentes).
+.IP "\fBJOURS_RETENTION_*_HEBDO\fR=\fI4\fR"
+Nombre de sauvegardes hebdomadaires (première de chaque semaine).
+.IP "\fBJOURS_RETENTION_*_MENSUEL\fR=\fI12\fR"
+Nombre de sauvegardes mensuelles (première de chaque mois).
+Exemple : `JOURS_RETENTION_DOCS_ERIC_QUOTIDIEN=7`
+
+.SS SECTION 9 - FICHIERS DE CONTRÔLE
+.IP "\fBPID_FILE\fR=\fI"/var/run/$DEFAULT_NOM_SCRIPT.pid"\fR"
+Fichier de verrouillage PID pour prévenir exécutions concurrentes.
+Géré automatiquement par `gerer_verrouillage()` avec nettoyage via `trap EXIT`.ses des machines distantes
+à partir desquelles des données seront sauvegardées. 
+.IP "\fBSSH_USER_PHOTOS\fR=\fI"utilisateur"\fR, \fBSSH_IP_PHOTOS\fR=\fI"adresse_ip"\fR, \fBSSH_PORT_PHOTOS\fR=\fI"port"\fR"
+Informations de connexion SSH pour la machine virtuelle photos. Le port est généralement `22`. 
+.IP "\fBSSH_USER_PROJETS\fR=\fI"utilisateur"\fR, \fBSSH_IP_PROJETS\fR=\fI"adresse_ip"\fR, \fBSSH_PORT_PROJETS\fR=\fI"port"\fR"
+Informations de connexion SSH pour le serveur de projets. 
+.IP "\fBSSH_USER_DOCS_PORTABLE\fR=\fI"utilisateur"\fR, \fBSSH_IP_DOCS_PORTABLE\fR=\fI"adresse_ip"\fR, \fBSSH_PORT_DOCS_PORTABLE\fR=\fI"port"\fR"
+Informations de connexion SSH pour l'ordinateur portable distant. 
+
+.SS SECTION 3 - CHEMINS DES SAUVEGARDES LOCALES ET DISTANTES
+Ces variables définissent les emplacements des données sources et de leurs destinations. 
+.IP "\fBSOURCE_LOCALE_DOCS_ERIC\fR=\fI"/home/eric/Documents"\fR"
+Chemin absolu des documents d'Eric sur la machine locale.
+.IP "\fBSOURCE_LOCALE_DOCS_FANOU\fR=\fI"/home/fanou/Documents"\fR"
+Chemin absolu des documents de Fanou sur la machine locale.
+.IP "\fBSOURCE_DIST_PHOTOS_VM\fR=\fI"/chemin/sur/vm/Photos"\fR"
+Chemin absolu des photos sur la machine virtuelle distante.
+.IP "\fBSOURCE_DIST_PROJETS_SERVEUR\fR=\fI"/Projets/Serveur/"\fR"
+Chemin absolu des projets sur le serveur distant.
+.IP "\fBSOURCE_DIST_DOCS_PORTABLE\fR=\fI"/home/utilisateur/Documents/"\fR"
+Chemin absolu des documents sur le portable distant.
+
+.SS SECTION 4 - CHEMINS DES DESTINATIONS DES SAUVEGARDES
+Ces variables définissent où les données sauvegardées seront stockées sur le disque de destination. 
+Deux types de destinations sont gérés : principales (pour les sauvegardes complètes) et incrémentales. 
+.IP "\fBDEST_MAIN_DOCS_ERIC\fR=\fI"$DEST_BASE_SAUVEGARDES/DocumentsEric/"\fR"
+Chemin de destination pour les sauvegardes complètes des documents d'Eric.
+.IP "\fBDEST_INCR_BASE_DOCS_ERIC\fR=\fI"$DEST_BASE_SAUVEGARDES/incremental-DocumentsEric/"\fR"
+Chemin de base pour les sauvegardes incrémentales des documents d'Eric.
+
+.SS SECTION 5 - POLITIQUES DE RÉTENTION
+Ces variables définissent le nombre de jours de rétention pour les sauvegardes incrémentales,
+pour chaque catégorie de données. 
+La rétention est gérée à trois niveaux : quotidien, hebdomadaire, mensuel. 
+.IP "\fBJOURS_RETENTION_DOCS_ERIC_QUOTIDIEN\fR=\fI7\fR"
+Nombre de jours pendant lesquels les sauvegardes quotidiennes sont conservées.
+.IP "\fBJOURS_RETENTION_DOCS_ERIC_HEBDO\fR=\fI4\fR"
+Nombre de semaines pendant lesquelles une sauvegarde hebdomadaire est conservée.
+.IP "\fBJOURS_RETENTION_DOCS_ERIC_MENSUEL\fR=\fI12\fR"
+Nombre de mois pendant lesquels une sauvegarde mensuelle est conservée.
+
+.SS SECTION 6 - POINTS DE MONTAGE SSHFS
+Ces variables sont utilisées pour la gestion des montages temporaires SSHFS. 
+.IP "\fBMONTAGE_SSHFS_PHOTOS\fR=\fI"/tmp/sshfs_mounts/photos_vm"\fR"
+Point de montage local pour les photos de la VM.
+.IP "\fBMONTAGE_SSHFS_PROJETS\fR=\fI"/tmp/sshfs_mounts/projets_serveur"\fR"
+Point de montage local pour les projets du serveur.
+.IP "\fBMONTAGE_SSHFS_DOCS_PORTABLE\fR=\fI"/tmp/sshfs_mounts/docs_portable"\fR"
+Point de montage local pour les documents du portable.
+
+.SH UTILISATION
+1.  \fBPré-requis\fR:
+    * Assurez-vous que
+        .B rsync
+        (1),
+        .B ssh
+        (1),
+        .B mail
+        (1) (ou `mailx`),
+        .B apache2
+        (8),
+        .B php
+        (1),
+        .B sshfs
+        (1) et
+        .B fuse
+        sont installés sur votre système. 
+    * Configurez l'accès SSH sans mot de passe (via clés SSH) pour tous les
+        hôtes distants que vous souhaitez sauvegarder. 
+        Utilisez `ssh-keygen` pour générer une paire de clés et `ssh-copy-id`
+        pour copier la clé publique sur les serveurs. 
+    * Assurez-vous que le disque de sauvegarde externe est monté sur le chemin
+        spécifié par
+        .B DEST_BASE_SAUVEGARDES
+        dans `config.sh`. 
+    * Vérifiez et ajustez les permissions du répertoire
+        .B LOG_DIR
+        pour que l'utilisateur exécutant le script puisse y écrire. 
+2.  \fBInstallation\fR: Exécutez le script d'installation automatique :
+    .PP
+    .B sudo ./setup-web.sh
+    .PP
+3.  \fBConfiguration\fR: Modifiez le fichier
+    .B config.sh
+    pour qu'il corresponde à votre environnement (chemins, IPs, utilisateurs,
+    politiques de rétention, options rsync, etc.). 
+4.  \fBExécution Manuelle\fR: Naviguez jusqu'au répertoire du script et exécutez-le. 
+    .RS
+    .IP \(bu 4
+    Pour exécuter toutes les sauvegardes par défaut :
+    .PP
+    .B ./sauvegarde.sh
+    .PP
+    .IP \(bu 4
+    Pour exécuter des sauvegardes spécifiques :
+    .PP
+    .B ./sauvegarde.sh docs_eric photos_vm
+    .PP
+    .IP \(bu 4
+    Pour exécuter toutes les sauvegardes : 
+    .PP
+    .B ./sauvegarde.sh all
+    .PP
+    .RE
+5.  \fBInterface Web\fR: Accédez à l'interface web via votre navigateur :
+    .PP
+    .B http://votre-serveur/backup-manager-web/web/
+    .PP
+6.  \fBExécution Automatisée (Cron)\fR: Pour automatiser les sauvegardes, vous pouvez ajouter
+    une tâche à votre `crontab`. Ouvrez votre crontab avec `crontab -e`.
+    .RS
+    .IP \(bu 4
+    Exemple pour exécuter toutes les sauvegardes tous les jours à 03h00 du matin :
+    .PP
+    `0 3 * * * /chemin/absolut/vers/sauvegarde.sh all > /dev/null 2>&1`
+    .PP
+    .RE
+
+.SH EXEMPLES PRATIQUES
+Voici quelques scénarios d'utilisation pour illustrer la flexibilité du système.
+
+.SS Sauvegarde Quotidienne via Interface Web
+Accédez au dashboard web et cliquez sur "Exécuter Toutes" pour lancer toutes les sauvegardes configurées.
+Le dashboard affichera la progression en temps réel.
+
+.SS Sauvegarde Hebdomadaire Incrémentale avec Rétention
+Éditez `config.sh` :
+.RS
+.IP "JOURS_RETENTION_PROJETS_QUOTIDIEN=7"
+.IP "JOURS_RETENTION_PROJETS_HEBDO=4" 
+.IP "JOURS_RETENTION_PROJETS_MENSUEL=12" 
+.RE
+Puis, exécutez via cron tous les dimanches à 04h30 :
+.RS
+.IP "`30 4 * * 0 /chemin/vers/sauvegarde.sh projets_serveur`"
+.RE
+
+.SS Test de Configuration en Mode Simulation
+.RS
+.IP \(bu 4
+Exécutez :
+.PP
+.B ./sauvegarde.sh --dry-run all
+.PP
+Vérifiez les logs pour analyser ce qui serait exécuté sans effectuer de modifications réelles.
+.RE
+
+.SH FICHIERS
+.IP "\fBsauvegarde.sh\fR"
+Le script Bash principal (800+ lignes, version 6.5). 
+.IP "\fBconfig.sh\fR"
+Le fichier de configuration principal (200+ lignes, 75+ variables). 
+.IP "\fBfonctions_erreur.sh\fR"
+Le fichier contenant les fonctions de journalisation et de gestion d'erreurs (400+ lignes). 
+.IP "\fBsetup-web.sh\fR"
+Script d'installation automatique multi-distributions.
+.IP "\fBdefault_backups.conf\fR"
+Configuration d'activation/désactivation des sauvegardes par défaut.
+.IP "\fBsauvegardes_custom.conf\fR"
+Configuration des sauvegardes personnalisées créées via l'interface web.
+.IP "\fBweb/index.php\fR"
+Dashboard principal de l'interface web (300+ lignes).
+.IP "\fBweb/manage.php\fR"
+Interface de gestion des sauvegardes personnalisées (250+ lignes).
+.IP "\fBweb/logs.php\fR"
+Interface de consultation des logs (200+ lignes).
+.IP "\fBweb/terminal.php\fR"
+Terminal interactif web (400+ lignes).
+.IP "\fBweb/status.php\fR"
+API JSON pour le statut temps réel (50 lignes).
+.IP "\fBweb/app.js\fR"
+Logique client JavaScript (500+ lignes).
+.IP "\fBweb/style.css\fR"
+Feuille de styles responsive (800+ lignes).
+.IP "\fB$LOG_DIR/sauvegarde_YYYY-MM-DD.log\fR"
+Fichier de log quotidien pour l'exécution du système. 
+.IP "\fB/tmp/backup_running.flag\fR"
+Indicateur d'exécution active.
+.IP "\fB/tmp/current_backup.txt\fR"
+Nom de la sauvegarde en cours.
+.IP "\fB/tmp/backup_progress.txt\fR"
+Progression 0-100%.
+.IP "\fB/tmp/backup_fallback_errors.log\fR"
+Fichier de log de secours utilisé si le système de journalisation principal a échoué. 
+.IP "\fB/var/www/.ssh/backup_key\fR"
+Clé SSH privée dédiée pour les sauvegardes web.
+.IP "\fB/var/www/.ssh/backup_key.pub\fR"
+Clé SSH publique à copier sur les serveurs distants.
+
+.SH ENVIRONNEMENT
+Le système s'appuie sur l'environnement Bash standard et un serveur web Apache/PHP. 
+Assurez-vous que votre
+variable `PATH` inclut les répertoires contenant les exécutables de `rsync`,
+`ssh`, `sshfs`, `mail`, `php`. 
+Pour l'envoi d'emails, un programme comme `mailx` doit être configuré pour relayer les emails. 
+
+.SH CODES DE RETOUR (EXIT STATUS)
+Le système retourne les codes de sortie suivants pour indiquer son statut d'exécution : 
+.IP "\fB0\fR"
+Succès. 
+Toutes les sauvegardes sélectionnées se sont déroulées sans aucune erreur. 
+.IP "\fB1-17\fR"
+Codes d'erreur spécifiques avec diagnostic automatique et actions suggérées.
+Un rapport détaillé sera disponible dans les logs et, si configuré, par email. 
+.IP "\fB127\fR"
+Commande non trouvée.
+Une dépendance système requise n'est pas installée.
+
+.SH DIAGNOSTICS ET DÉBOGAGE
+Cette section fournit des informations détaillées pour diagnostiquer et résoudre
+les problèmes potentiels.
+
+.SS 1. Étapes de Diagnostic Générales
+Si le système ne se comporte pas comme prévu ou si vous recevez une notification d'erreur :
+.IP \(bu 4
+\fBConsultez les Logs\fR: Le système génère des logs détaillés dans
+.B $LOG_DIR
+(généralement `/var/log/sauvegardes/sauvegarde_YYYY-MM-DD.log`). 
+.IP \(bu 4
+\fBUtilisez l'Interface Web\fR: Le dashboard web affiche le statut en temps réel
+et permet de consulter les logs via l'interface.
+.IP \(bu 4
+\fBMode Simulation\fR: Utilisez l'option `--dry-run` pour tester la configuration
+sans effectuer de modifications réelles.
+.IP \(bu 4
+\fBVérifiez la Configuration\fR: Relisez attentivement votre fichier `config.sh`.
+
+.SS 2. Problèmes Courants et Leurs Solutions
+.IP \(bu 4
+\fBErreurs de Connexion SSH\fR
+.RS
+.IP "Action :"
+Testez la connexion SSH manuellement et vérifiez que les clés SSH sont correctement configurées.
+.RE
+.IP \(bu 4
+\fBEspace Disque Insuffisant\fR
+.RS
+.IP "Action :"
+Libérez de l'espace sur votre disque de sauvegarde ou ajustez les politiques de rétention.
+.RE
+.IP \(bu 4
+\fBProblèmes de Permissions\fR
+.RS
+.IP "Action :"
+Vérifiez les permissions des répertoires source, destination et de logs.
+.RE
+
+.SH BUGS
+Pour signaler tout bogue, comportement inattendu, ou pour proposer des améliorations
+pour
+.B backup-manager-web
+, veuillez vous référer au repository GitHub du projet. 
+Fournissez toujours un maximum de détails sur le problème,
+y compris les messages d'erreur complets, les logs et votre configuration. 
+
+.SH AUTEURS
+Auteur original: enRIKO
+Contributeurs: geole, iznobe, Watael, steph810
+Date de version majeure : 2025-07-24
+
+.SH VOIR AUSSI
+.BR rsync (1),
+.BR ssh (1),
+.BR sshfs (1),
+.BR cron (8),
+.BR crontab (1),
+.BR mail (1),
+.BR apache2 (8),
+.BR php (1),
+.BR chmod (1),
+.BR chown (1)

@@ -17,7 +17,7 @@
 # - 6.3 Beta (2025-06-24) :
 #   - AJOUT DE CODES D'ERREUR : Nouveaux codes pour couvrir plus de scénarios d'échec spécifiques.
 #   - Affinement des messages et actions suggérées pour chaque code d'erreur.
-# - 6.2 Beta (2025-06-24) :
+# - 6.5 (2025-06-24) :
 #   - Amélioration de la validation 'path' : permet aux répertoires de destination de ne pas exister s'ils seront créés.
 #   - Remplacement de 'ping' par une vérification SSH réelle dans verifier_connexion_ssh.
 #   - Suppression de 'eval' dans valider_variable pour la vérification des chemins.
@@ -257,6 +257,36 @@ monter_sshfs() {
         return 0
     fi
 
+    # ADAPTATION POUR INTERFACE WEB
+    if [[ "$(whoami)" == "www-data" ]]; then
+        log_info "Mode web détecté. Utilisation de SSHFS avec clés partagées."
+        
+        local ssh_key="/var/www/.ssh/backup_key"
+        
+        # Créer le point de montage si nécessaire
+        mkdir -p "$point_montage_local"
+        
+        # Vérifier si déjà monté
+        if mountpoint -q "$point_montage_local" 2>/dev/null; then
+            log_info "Point de montage déjà actif: $point_montage_local"
+            return 0
+        fi
+        
+        # Montage SSHFS avec clé dédiée
+        log_info "Montage SSHFS: $utilisateur@$ip:$chemin_distant -> $point_montage_local"
+        sshfs -o "IdentityFile=$ssh_key,StrictHostKeyChecking=no,UserKnownHostsFile=/dev/null,port=$port,reconnect" \
+              "$utilisateur@$ip:$chemin_distant" "$point_montage_local" 2>/dev/null
+        
+        if mountpoint -q "$point_montage_local" 2>/dev/null; then
+            log_info "Montage SSHFS réussi (mode web): $point_montage_local"
+            return 0
+        else
+            log_error "Échec montage SSHFS en mode web. Vérifiez la clé SSH et la connectivité."
+            return 1
+        fi
+    fi
+
+    # MODE NORMAL (code existant)
     # shellcheck disable=SC2154 # CHEMIN_SSHFS, CHEMIN_MOUNTPOINT, CHEMIN_MKDIR sont définis dans config.sh
     local sshfs_cmd="${CHEMIN_SSHFS:-sshfs}"
     local mountpoint_cmd="${CHEMIN_MOUNTPOINT:-mountpoint}"
@@ -288,7 +318,7 @@ monter_sshfs() {
         log_info "Création du point de montage SSHFS: $point_montage_local"
         # Vérifier la présence de la commande 'mkdir'
         if ! command -v "$mkdir_cmd" >/dev/null 2>&1; then
-            log_error "La commande 'mkdir' (ou chemin configuré: '$CHEMIN_MKDIR') n'a pas été trouvée dans le PATH. Impossible de créer le répertoire de montage."
+            log_error "La commande '$mkdir_cmd' n'a pas été trouvée dans le PATH. Impossible de créer le répertoire de montage."
             diagnostiquer_et_logger_erreur 127 "Dépendance manquante: mkdir."
         fi
         "$mkdir_cmd" -p "$point_montage_local" || { log_error "Impossible de créer le répertoire de montage $point_montage_local."; diagnostiquer_et_logger_erreur 12; }
@@ -319,6 +349,19 @@ demonter_sshfs() {
     # shellcheck disable=SC2154 # DEFAULT_TYPE_CONNEXION_DISTANTE est défini dans config.sh
     if [[ "${DEFAULT_TYPE_CONNEXION_DISTANTE:-0}" -ne 0 ]]; then
         log_info "Type de connexion distante n'est pas SSHFS. Ignorance du démontage SSHFS pour $point_montage_local."
+        return 0
+    fi
+
+    # ADAPTATION POUR INTERFACE WEB
+    if [[ "$(whoami)" == "www-data" ]]; then
+        if mountpoint -q "$point_montage_local" 2>/dev/null; then
+            log_info "Démontage SSHFS (mode web): $point_montage_local"
+            fusermount -u "$point_montage_local" 2>/dev/null
+            if ! mountpoint -q "$point_montage_local" 2>/dev/null; then
+                log_info "Démontage SSHFS réussi (mode web)"
+                return 0
+            fi
+        fi
         return 0
     fi
 

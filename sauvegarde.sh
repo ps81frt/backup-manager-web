@@ -5,11 +5,11 @@ export LC_ALL=C
 # Sauvegarde des données
 # Auteur : enRIKO (modifié par geole, iznobe, Watael, steph810, amélioré pour qualité irréprochable)
 # Date : 2025-06-24
-# Version : 6.2 Beta
+# Version : 6.5
 # Description : Script de sauvegarde incrémentale avec validation renforcée, mode dry-run, et gestion avancée des erreurs.
 #
 # Changelog :
-# - 6.2 Beta (2025-06-24) :
+# - 6.5 (2025-06-24) :
 #   - Intégration des fonctions d'erreurs avancées et des codes d'erreur spécifiques.
 #   - Utilisation des chemins d'exécutables configurables depuis config.sh (CHEMIN_RSYNC, CHEMIN_SSH, etc.).
 #   - Gestion améliorée de RSYNC_DELETE pour appliquer --delete conditionnellement.
@@ -43,11 +43,75 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "$SCRIPT_DIR/config.sh"
 # Charger les sauvegardes personnalisées si le fichier existe
 if [[ -f "$SCRIPT_DIR/sauvegardes_custom.conf" ]]; then
-    source "$SCRIPT_DIR/sauvegardes_custom.conf"
+    # Filtrer les sauvegardes désactivées
+    grep -v "# SAUVEGARDE_DISABLED:" "$SCRIPT_DIR/sauvegardes_custom.conf" > "/tmp/sauvegardes_active.conf"
+    source "/tmp/sauvegardes_active.conf"
+    rm -f "/tmp/sauvegardes_active.conf"
 fi
 source "$SCRIPT_DIR/fonctions_erreur.sh"
 
+# --- FONCTION DE VÉRIFICATION DES SAUVEGARDES PAR DÉFAUT ---
+# Vérifie si une sauvegarde par défaut est activée dans default_backups.conf
+is_default_backup_enabled() {
+    local backup_name="$1"
+    local default_config="$SCRIPT_DIR/default_backups.conf"
+    
+    # Si le fichier n'existe pas, tout est activé par défaut
+    if [[ ! -f "$default_config" ]]; then
+        return 0
+    fi
+    
+    # Vérifier si la ligne existe et est à 1
+    if grep -q "^${backup_name}=1" "$default_config"; then
+        return 0  # Activée
+    else
+        return 1  # Désactivée ou commentée
+    fi
+}
+
 # --- VÉRIFICATIONS PRÉ-DÉMARRAGE ---
+# Configuration pour exécution web
+configure_web_environment() {
+    if [[ "$(whoami)" == "www-data" ]]; then
+        log_info "Configuration de l'environnement web détectée..."
+        
+        # Adapter les répertoires si nécessaire
+        if [[ ! -w "$LOG_DIR" ]]; then
+            LOG_DIR="/tmp/backup_logs"
+            mkdir -p "$LOG_DIR"
+            LOG_FILE="${LOG_DIR}/sauvegarde_$(date '+%Y%m%d').log"
+            log_info "Logs redirigés vers: $LOG_FILE"
+        fi
+        
+        if [[ ! -w "$DEST_BASE_SAUVEGARDES" ]]; then
+            DEST_BASE_SAUVEGARDES="/tmp/backups"
+            mkdir -p "$DEST_BASE_SAUVEGARDES"
+            log_info "Destination adaptée vers: $DEST_BASE_SAUVEGARDES"
+            
+            # Recalculer tous les chemins de destination
+            DEST_MAIN_DOCS_ERIC="$DEST_BASE_SAUVEGARDES/DocumentsEric/"
+            DEST_INCR_BASE_DOCS_ERIC="$DEST_BASE_SAUVEGARDES/incremental-DocumentsEric/"
+            DEST_MAIN_DOCS_FANOU="$DEST_BASE_SAUVEGARDES/DocumentsFanou/"
+            DEST_INCR_BASE_DOCS_FANOU="$DEST_BASE_SAUVEGARDES/incremental-DocumentsFanou/"
+            DEST_MAIN_PHOTOS="$DEST_BASE_SAUVEGARDES/PhotosVM/"
+            DEST_INCR_BASE_PHOTOS="$DEST_BASE_SAUVEGARDES/incremental-PhotosVM/"
+            DEST_MAIN_PROJETS="$DEST_BASE_SAUVEGARDES/ProjetsServeur/"
+            DEST_INCR_BASE_PROJETS="$DEST_BASE_SAUVEGARDES/incremental-ProjetsServeur/"
+            DEST_MAIN_DOCS_PORTABLE="$DEST_BASE_SAUVEGARDES/DocumentsPortable/"
+            DEST_INCR_BASE_DOCS_PORTABLE="$DEST_BASE_SAUVEGARDES/incremental-DocumentsPortable/"
+        fi
+        
+        # Créer les points de montage SSHFS
+        mkdir -p /tmp/sshfs_mounts/{photos_vm,projets_serveur,docs_portable}
+        
+        # Configurer l'environnement SSH
+        export HOME="/var/www"
+    fi
+}
+
+# Appeler la configuration web
+configure_web_environment
+
 # Vérifie que le répertoire de log est bien accessible en écriture
 verifier_permissions_log_dir
 
@@ -138,12 +202,24 @@ done
 
 # Si --list est activé, affiche les sélections et quitte
 if [[ "$LIST_MODE" -eq 1 ]]; then
-    echo "Sélections de sauvegarde disponibles (définies dans config.sh) :"
-    echo "  docs_eric"
-    echo "  docs_fanou"
-    echo "  photos_vm"
-    echo "  projets_serveur" # Correction du nom de la sélection
-    echo "  docs_portable" # Correction du nom de la sélection
+    echo "Sélections de sauvegarde disponibles :"
+    echo ""
+    echo "Sauvegardes par défaut :"
+    for backup in docs_eric docs_fanou photos_vm projets_serveur docs_portable; do
+        if is_default_backup_enabled "$backup"; then
+            echo "  ✅ $backup (activée)"
+        else
+            echo "  ❌ $backup (désactivée)"
+        fi
+    done
+    
+    echo ""
+    echo "Sauvegardes personnalisées :"
+    if [[ -f "$SCRIPT_DIR/sauvegardes_custom.conf" ]]; then
+        grep "# SAUVEGARDE:" "$SCRIPT_DIR/sauvegardes_custom.conf" | sed 's/# SAUVEGARDE: /  ✅ /' | sed 's/$/ (personnalisée)/'
+    else
+        echo "  Aucune sauvegarde personnalisée configurée"
+    fi
     echo ""
     exit 0
 fi
@@ -167,6 +243,91 @@ fi
 
 
 # --- FONCTIONS UTILES ---
+
+# Fonction pour traiter les sauvegardes personnalisées
+traiter_sauvegarde_personnalisee() {
+    local nom_sauvegarde="$1"
+    local nom_upper=$(echo "$nom_sauvegarde" | tr '[:lower:]' '[:upper:]')
+    
+    # Vérifier si les variables existent
+    local source_locale_var="SOURCE_LOCALE_${nom_upper}"
+    local source_dist_var="SOURCE_DIST_${nom_upper}"
+    
+    if [[ -n "${!source_locale_var:-}" ]]; then
+        # Sauvegarde locale personnalisée
+        log_info "Traitement de la sauvegarde locale personnalisée '$nom_sauvegarde'..."
+        local dest_main_var="DEST_MAIN_${nom_upper}"
+        local dest_incr_var="DEST_INCR_BASE_${nom_upper}"
+        
+        if effectuer_sauvegarde "locale" \
+            "${!source_locale_var}" \
+            "${!dest_main_var}" \
+            "${!dest_incr_var}" \
+            "" "" "" ""; then
+            sauvegardes_reussies=$((sauvegardes_reussies + 1))
+            
+            # Nettoyage si configuré
+            if [[ "$DRY_RUN" -eq 0 ]]; then
+                local ret_q_var="JOURS_RETENTION_${nom_upper}_QUOTIDIEN"
+                local ret_h_var="JOURS_RETENTION_${nom_upper}_HEBDO"
+                local ret_m_var="JOURS_RETENTION_${nom_upper}_MENSUEL"
+                
+                if [[ "${!ret_q_var:-0}" -gt 0 || "${!ret_h_var:-0}" -gt 0 || "${!ret_m_var:-0}" -gt 0 ]]; then
+                    nettoyer_anciennes_sauvegardes \
+                        "${!dest_incr_var}" \
+                        "${!ret_q_var:-7}" \
+                        "${!ret_h_var:-4}" \
+                        "${!ret_m_var:-12}"
+                fi
+            fi
+        else
+            sauvegardes_echouees=$((sauvegardes_echouees + 1))
+        fi
+        return 0
+        
+    elif [[ -n "${!source_dist_var:-}" ]]; then
+        # Sauvegarde distante personnalisée
+        log_info "Traitement de la sauvegarde distante personnalisée '$nom_sauvegarde'..."
+        local ssh_user_var="SSH_USER_${nom_upper}"
+        local ssh_ip_var="SSH_IP_${nom_upper}"
+        local ssh_port_var="SSH_PORT_${nom_upper}"
+        local montage_var="MONTAGE_SSHFS_${nom_upper}"
+        local dest_main_var="DEST_MAIN_${nom_upper}"
+        local dest_incr_var="DEST_INCR_BASE_${nom_upper}"
+        
+        if effectuer_sauvegarde "distante" \
+            "${!source_dist_var}" \
+            "${!dest_main_var}" \
+            "${!dest_incr_var}" \
+            "${!ssh_user_var}" \
+            "${!ssh_ip_var}" \
+            "${!ssh_port_var:-22}" \
+            "${!montage_var}"; then
+            sauvegardes_reussies=$((sauvegardes_reussies + 1))
+            
+            # Nettoyage si configuré
+            if [[ "$DRY_RUN" -eq 0 ]]; then
+                local ret_q_var="JOURS_RETENTION_${nom_upper}_QUOTIDIEN"
+                local ret_h_var="JOURS_RETENTION_${nom_upper}_HEBDO"
+                local ret_m_var="JOURS_RETENTION_${nom_upper}_MENSUEL"
+                
+                if [[ "${!ret_q_var:-0}" -gt 0 || "${!ret_h_var:-0}" -gt 0 || "${!ret_m_var:-0}" -gt 0 ]]; then
+                    nettoyer_anciennes_sauvegardes \
+                        "${!dest_incr_var}" \
+                        "${!ret_q_var:-7}" \
+                        "${!ret_h_var:-4}" \
+                        "${!ret_m_var:-12}"
+                fi
+            fi
+        else
+            sauvegardes_echouees=$((sauvegardes_echouees + 1))
+        fi
+        return 0
+    fi
+    
+    # Sauvegarde non trouvée
+    return 1
+}
 
 # Fonction pour gérer le verrouillage du script
 gerer_verrouillage() {
@@ -469,13 +630,35 @@ if [[ -n "$SCRIPT_PRE_SAUVEGARDE_GLOBAL" ]]; then
     fi
 fi
 
+# Créer le flag de démarrage
+touch /tmp/backup_running.flag
+echo "$(date '+%Y-%m-%d %H:%M:%S')" > /tmp/backup_start_time.txt
+echo "0" > /tmp/backup_progress.txt
+
 log_info "=== DÉBUT DES SAUVEGARDES ==="
 log_info "Sélections à traiter : ${SAUVEGARDES_A_TRAITER[*]}"
 
 nombre_sauvegardes=${#SAUVEGARDES_A_TRAITER[@]}
+current_index=0
 
 # Boucle principale de traitement des sélections
 for i in "${SAUVEGARDES_A_TRAITER[@]}"; do
+    # Vérifier si c'est une sauvegarde par défaut désactivée
+    case "$i" in
+        docs_eric|docs_fanou|photos_vm|projets_serveur|docs_portable)
+            if ! is_default_backup_enabled "$i"; then
+                log_info "Sauvegarde '$i' désactivée dans default_backups.conf, ignorée"
+                continue
+            fi
+            ;;
+    esac
+    
+    # Mettre à jour le statut
+    echo "$i" > /tmp/current_backup.txt
+    progress=$((current_index * 100 / nombre_sauvegardes))
+    echo "$progress" > /tmp/backup_progress.txt
+    current_index=$((current_index + 1))
+    
     case "$i" in
         docs_eric)
             log_info "Traitement de la sauvegarde 'Docs Eric'..."
@@ -595,15 +778,17 @@ for i in "${SAUVEGARDES_A_TRAITER[@]}"; do
                 "$SSH_PORT_DOCS_PORTABLE" \
                 "$MONTAGE_SSHFS_DOCS_PORTABLE"; then # Correction: MONTAGE_SSHFS_MUSIQUES -> MONTAGE_SSHFS_DOCS_PORTABLE
                 sauvegardes_reussies=$((sauvegardes_reussies + 1))
-                # shellcheck disable=SC2154 # DEFAULT_MODE_INCREMENTAL n'existe pas, utiliser la présence de DEST_INCR_BASE_DOCS_PORTABLE
-                if [[ "$DRY_RUN" -eq 0 ]]; then # Correction: La condition "&& $DRY_RUN -eq 0" doit être ici, pas sur DEST_INCR_BASE_DOCS_PORTABLE
-                    # shellcheck disable=SC2154 # Jours de rétention sont définis dans config.sh
-                    if [[ "$JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN" -gt 0 || "$JOURS_RETENTION_DOCS_PORTABLE_HEBDO" -gt 0 || "$JOURS_RETENTION_DOCS_PORTABLE_MENSUEL" -gt 0 ]]; then
-                        nettoyer_anciennes_sauvegardes \
-                            "$DEST_INCR_BASE_DOCS_PORTABLE" \
-                            "$JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN" \
-                            "$JOURS_RETENTION_DOCS_PORTABLE_HEBDO" \
-                            "$JOURS_RETENTION_DOCS_PORTABLE_MENSUEL"
+                # shellcheck disable=SC2154 # Utiliser la présence de DEST_INCR_BASE_DOCS_PORTABLE
+                if [[ -n "$DEST_INCR_BASE_DOCS_PORTABLE" ]]; then
+                    if [[ "$DRY_RUN" -eq 0 ]]; then
+                        # shellcheck disable=SC2154 # Jours de rétention sont définis dans config.sh
+                        if [[ "$JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN" -gt 0 || "$JOURS_RETENTION_DOCS_PORTABLE_HEBDO" -gt 0 || "$JOURS_RETENTION_DOCS_PORTABLE_MENSUEL" -gt 0 ]]; then
+                            nettoyer_anciennes_sauvegardes \
+                                "$DEST_INCR_BASE_DOCS_PORTABLE" \
+                                "$JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN" \
+                                "$JOURS_RETENTION_DOCS_PORTABLE_HEBDO" \
+                                "$JOURS_RETENTION_DOCS_PORTABLE_MENSUEL"
+                        fi
                     fi
                 fi
             else
@@ -611,9 +796,13 @@ for i in "${SAUVEGARDES_A_TRAITER[@]}"; do
             fi
             ;;
         *)
-            log_warning "Valeur de sélection inconnue ignorée: $i"
-            # Utilise diagnostiquer_et_logger_erreur pour une erreur grave (code 14)
-            diagnostiquer_et_logger_erreur 14 "Sélection de sauvegarde inconnue ou non gérée: $i."
+            # Tentative de traitement d'une sauvegarde personnalisée
+            if traiter_sauvegarde_personnalisee "$i"; then
+                log_info "Sauvegarde personnalisée '$i' traitée avec succès."
+            else
+                log_warning "Valeur de sélection inconnue ignorée: $i"
+                diagnostiquer_et_logger_erreur 14 "Sélection de sauvegarde inconnue ou non gérée: $i."
+            fi
             ;;
     esac
 done
@@ -669,6 +858,16 @@ if [[ -n "$SCRIPT_POST_SAUVEGARDE_GLOBAL" ]]; then
     else
         log_warning "Le script de post-sauvegarde global '$SCRIPT_POST_SAUVEGARDE_GLOBAL' n'existe pas ou n'est pas exécutable."
     fi
+fi
+
+# Nettoyer les fichiers de statut
+rm -f /tmp/backup_running.flag /tmp/current_backup.txt /tmp/backup_progress.txt /tmp/backup_start_time.txt
+
+# Enregistrer le résultat final
+if [[ "$sauvegardes_echouees" -eq 0 ]]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Toutes les sauvegardes réussies" > /tmp/last_success.txt
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $sauvegardes_echouees sauvegarde(s) échouée(s)" > /tmp/last_error.txt
 fi
 
 log_info "Script de sauvegarde terminé."

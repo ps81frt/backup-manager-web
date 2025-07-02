@@ -7,6 +7,34 @@ const SCRIPT_PATH = '../sauvegarde.sh';
 let isRunning = false;
 let customBackups = [];
 
+// NOUVELLE FONCTION: Exécution réelle via PHP
+async function executeRealBackup(selection, dryRun = false) {
+    const formData = new FormData();
+    formData.append('action', 'run_backup');
+    formData.append('selection', selection);
+    if (dryRun) formData.append('dry_run', '1');
+    
+    try {
+        const response = await fetch('index.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            const result = await response.text();
+            // Extraire le résultat de la réponse HTML
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(result, 'text/html');
+            const alertDiv = doc.querySelector('.alert.alert-success pre');
+            return alertDiv ? alertDiv.textContent : 'Exécution terminée';
+        } else {
+            throw new Error('Erreur HTTP: ' + response.status);
+        }
+    } catch (error) {
+        throw new Error('Erreur de communication: ' + error.message);
+    }
+}
+
 // Fonctions utilitaires
 function showMessage(text, type = 'info') {
     const messageArea = document.getElementById('message-area');
@@ -21,6 +49,8 @@ function showMessage(text, type = 'info') {
 
 function addToConsole(text) {
     const console = document.getElementById('console');
+    if (!console) return; // Élément peut ne pas exister sur toutes les pages
+    
     const timestamp = new Date().toLocaleTimeString('fr-FR');
     console.innerHTML += `<div class="console-line"><span class="timestamp">[${timestamp}]</span> ${text}</div>`;
     console.scrollTop = console.scrollHeight;
@@ -44,14 +74,26 @@ async function runBackup(selection, dryRun = false) {
     showMessage(`Exécution de la sauvegarde "${selection}"${mode}...`, 'info');
     
     try {
-        // Simulation de l'exécution du script
-        await simulateBackupExecution(selection, dryRun);
+        // EXÉCUTION RÉELLE via PHP
+        addToConsole(`⏳ Exécution du script de sauvegarde...`);
+        const result = await executeRealBackup(selection, dryRun);
+        
+        // Afficher le résultat ligne par ligne
+        const lines = result.split('\n');
+        lines.forEach(line => {
+            if (line.trim()) {
+                addToConsole(line);
+            }
+        });
         
         addToConsole(`✅ Sauvegarde "${selection}" terminée avec succès`);
         showMessage(`Sauvegarde "${selection}" terminée avec succès !`, 'success');
         
-        // Mettre à jour la dernière exécution
-        document.getElementById('last-run').textContent = new Date().toLocaleString('fr-FR');
+        // Mettre à jour la dernière exécution si l'élément existe
+        const lastRunElement = document.getElementById('last-run');
+        if (lastRunElement) {
+            lastRunElement.textContent = new Date().toLocaleString('fr-FR');
+        }
         
     } catch (error) {
         addToConsole(`❌ Erreur lors de la sauvegarde "${selection}": ${error.message}`);
@@ -169,10 +211,99 @@ function exportConfig() {
     URL.revokeObjectURL(url);
 }
 
+// Polling temps réel du statut
+let statusInterval;
+
+function startStatusPolling() {
+    statusInterval = setInterval(updateStatus, 2000); // Toutes les 2 secondes
+    updateStatus(); // Première mise à jour immédiate
+}
+
+function stopStatusPolling() {
+    if (statusInterval) {
+        clearInterval(statusInterval);
+    }
+}
+
+async function updateStatus() {
+    try {
+        const response = await fetch('status.php');
+        const status = await response.json();
+        
+        // Mettre à jour le dashboard
+        updateDashboard(status);
+        
+    } catch (error) {
+        console.error('Erreur lors de la mise à jour du statut:', error);
+    }
+}
+
+function updateDashboard(status) {
+    // Statut principal
+    const statusElement = document.getElementById('backup-status');
+    const statusMetric = document.getElementById('backup-status-metric');
+    if (statusElement && statusMetric) {
+        if (status.running) {
+            statusElement.innerHTML = 'En cours';
+            statusElement.className = 'backup-status-running';
+            statusMetric.innerHTML = '🟡';
+        } else {
+            statusElement.innerHTML = 'Inactif';
+            statusElement.className = 'backup-status-active';
+            statusMetric.innerHTML = '🟢';
+        }
+    }
+    
+    // Sauvegarde en cours
+    const currentElement = document.getElementById('current-backup');
+    if (currentElement) {
+        currentElement.textContent = status.current_backup || 'Aucune sauvegarde';
+    }
+    
+    // Progression
+    const progressFill = document.getElementById('progress-fill');
+    const progressMetric = document.getElementById('progress-metric');
+    if (progressFill && progressMetric) {
+        const progress = parseInt(status.progress) || 0;
+        progressFill.style.width = progress + '%';
+        progressMetric.textContent = progress + '%';
+    }
+    
+    // Durée
+    const durationMetric = document.getElementById('duration-metric');
+    if (durationMetric && status.start_time) {
+        const startTime = new Date(status.start_time);
+        const now = new Date();
+        const duration = Math.floor((now - startTime) / 1000);
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        durationMetric.textContent = `${minutes}m ${seconds}s`;
+    } else if (durationMetric) {
+        durationMetric.textContent = '-';
+    }
+    
+    // Logs en direct
+    const logsElement = document.getElementById('live-logs');
+    if (logsElement && status.last_log) {
+        logsElement.innerHTML = status.last_log
+            .map(line => {
+                let className = 'log-line';
+                if (line.includes('[INFO]')) className += ' log-info';
+                else if (line.includes('[ATTENTION]')) className += ' log-warning';
+                else if (line.includes('[ERREUR]')) className += ' log-error';
+                return `<div class="${className}">${line}</div>`;
+            })
+            .join('');
+    }
+}
+
 // Initialisation de l'application
 document.addEventListener('DOMContentLoaded', function() {
     // Charger les sauvegardes personnalisées
     loadCustomBackups();
+    
+    // Démarrer le polling de statut
+    startStatusPolling();
     
     // Ajouter des raccourcis clavier
     document.addEventListener('keydown', function(e) {
@@ -194,6 +325,9 @@ document.addEventListener('DOMContentLoaded', function() {
     addToConsole('🎯 Interface de gestion des sauvegardes initialisée');
     addToConsole('💡 Raccourcis: Ctrl+R (exécuter tout), Ctrl+L (effacer console)');
 });
+
+// Arrêter le polling quand on quitte la page
+window.addEventListener('beforeunload', stopStatusPolling);
 
 // Fonctions pour la gestion des erreurs
 window.addEventListener('error', function(e) {

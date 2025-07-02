@@ -58,6 +58,9 @@ DEFAULT_TYPE_CONNEXION_DISTANTE=0
 # Utilisez "all" pour inclure toutes les sauvegardes définies.
 DEFAULT_SELECTIONS_SAUVEGARDES="docs_eric docs_fanou"
 
+# Mode incrémental par défaut (0=complet, 1=incrémental)
+DEFAULT_MODE_INCREMENTAL=1
+
 
 # --- CHEMINS CRITIQUES ET BINAIRES ---
 
@@ -68,7 +71,7 @@ DEST_BASE_SAUVEGARDES="/mnt/backup_nas"
 LOG_DIR="/var/log/sauvegardes"
 
 # Chemin complet du fichier de verrouillage. Doit être accessible en écriture.
-PID_FILE="/var/run/${DEFAULT_NOM_SCRIPT}.pid"
+PID_FILE="/var/run/$DEFAULT_NOM_SCRIPT.pid"
 
 # Chemin du fichier de clé privée SSH (laissez vide si authentification par agent ou mot de passe).
 # Ex: SSH_KEY_PATH="/home/votre_utilisateur/.ssh/id_rsa_backup"
@@ -217,7 +220,6 @@ JOURS_RETENTION_PROJETS_SERVEUR_HEBDO=4
 JOURS_RETENTION_PROJETS_SERVEUR_MENSUEL=12
 
 # Rétention pour Docs Portable
-# NOTE: Le nom de la variable JOURS_RETENTION_MUSIQUES_QUOTIDIEN a été corrigé en JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN pour cohérence.
 JOURS_RETENTION_DOCS_PORTABLE_QUOTIDIEN=7
 JOURS_RETENTION_DOCS_PORTABLE_HEBDO=4
 JOURS_RETENTION_DOCS_PORTABLE_MENSUEL=12
